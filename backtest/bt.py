@@ -29,7 +29,7 @@ def indicators(W, idx):
     I["mkt_on"] = (k > k.rolling(200).mean())
     return I
 
-def run(W, idx, I, rule, start="2015-01-01", end=None, max_pos=10, stop=0.07, max_hold=None, mkt_filter=True, cash0=10_000_000, min_val=2e9):
+def run(W, idx, I, rule, start="2015-01-01", end=None, max_pos=10, stop=0.07, max_hold=None, mkt_filter=True, cash0=10_000_000, min_val=2e9, mkt2d=None):
     o, h, l, c = (W[k] for k in ("open", "high", "low", "close"))
     dates = c.loc[start:end].index
     cols = c.columns; ci = {k: i for i, k in enumerate(cols)}
@@ -46,6 +46,7 @@ def run(W, idx, I, rule, start="2015-01-01", end=None, max_pos=10, stop=0.07, ma
         ent = up & (c > I["ma20"]).values & (c.shift(1) <= I["ma20"].shift(1)).values & (I["ma20"] > I["ma60"]).values
         rank = I["mom120"].values; ext = (c < I["ma60"]).values
     mkt = I["mkt_on"].reindex(c.index).fillna(False).values
+    if mkt2d is not None: ent = ent & mkt2d            # 종목별(시장별) 필터
     cash, pos, eq, trades = cash0, {}, [], []
     pend_buy, pend_sell = [], set()
     for d in dates:
@@ -75,7 +76,7 @@ def run(W, idx, I, rule, start="2015-01-01", end=None, max_pos=10, stop=0.07, ma
         # 3) 종가 기준 신호
         for j, p in pos.items():
             if ext[t, j] or (max_hold and p["n"] >= max_hold): pend_sell.add(j)
-        if (mkt[t] or not mkt_filter):
+        if (mkt2d is not None or mkt[t] or not mkt_filter):
             free = max_pos - len(pos) + len(pend_sell)
             if free > 0:
                 cand = [j for j in np.where(ent[t])[0] if j not in pos]
