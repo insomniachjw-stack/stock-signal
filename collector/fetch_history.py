@@ -6,6 +6,8 @@ import pandas as pd, requests
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"}
 TOP_N = int(sys.argv[1]) if len(sys.argv) > 1 else 600
 START = sys.argv[2] if len(sys.argv) > 2 else "20130101"
+# 자산배분용 ETF: 코스피200, 코스닥150, 나스닥100, S&P500(H), 국고채10년, 골드(H), 달러, 단기채권
+ETFS = ["069500", "229200", "133690", "143850", "148070", "132030", "138230", "153130"]
 S = requests.Session(); S.headers.update(UA)
 
 def get(url, tries=4):
@@ -49,7 +51,7 @@ if __name__ == "__main__":
     uni = universe()
     print("universe", len(uni), flush=True)
     uni.to_csv("universe.csv", index=False)
-    codes = list(uni["code"].head(TOP_N)) + ["KOSPI", "KOSDAQ", "069500", "153130"]
+    codes = list(uni["code"].head(TOP_N)) + ["KOSPI", "KOSDAQ"] + ETFS
     out, fail = [], []
     def job(c):
         try: return history(c)

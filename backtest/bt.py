@@ -4,7 +4,7 @@ import numpy as np, pandas as pd
 
 FEE = 0.0015      # 편도 수수료+슬리피지 가정
 TAX = 0.0020      # 매도 시 거래세 가정
-INDEX = ["KOSPI", "KOSDAQ", "069500", "153130"]
+INDEX = ["KOSPI", "KOSDAQ", "069500", "229200", "133690", "143850", "148070", "132030", "138230", "153130"]
 
 def load(path):
     px = pd.read_parquet(path)
