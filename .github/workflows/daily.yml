@@ -1,0 +1,26 @@
+name: daily-signals
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "40 7 * * 1-5"    # 평일 16:40 KST (장 마감 후)
+  push:
+    paths: ["collector/daily.py", ".github/workflows/daily.yml"]
+permissions:
+  contents: write
+concurrency: daily-signals
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q requests pandas numpy
+      - run: python collector/daily.py
+      - name: 결과 저장
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data.json
+          git diff --cached --quiet || (git commit -qm "신호 갱신 $(date -u +%F)" && git pull -q --rebase origin main && git push -q origin main)

@@ -1,8 +1,6 @@
 name: fetch-history
 on:
   workflow_dispatch:
-  push:
-    paths: ["collector/fetch_history.py", ".github/workflows/history.yml"]
 permissions:
   contents: write
 jobs:

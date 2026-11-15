@@ -4,8 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd, requests
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36"}
-TOP_N = int(sys.argv[1]) if len(sys.argv) > 1 else 600
-START = sys.argv[2] if len(sys.argv) > 2 else "20130101"
+TOP_N, START = 600, "20130101"
 # 자산배분용 ETF: 코스피200, 코스닥150, 나스닥100, S&P500(H), 국고채10년, 골드(H), 달러, 단기채권
 ETFS = ["069500", "229200", "133690", "143850", "148070", "132030", "138230", "153130"]
 S = requests.Session(); S.headers.update(UA)
@@ -48,6 +47,8 @@ def history(code):
     return df[["date", "code", "open", "high", "low", "close", "volume"]]
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1: TOP_N = int(sys.argv[1])
+    if len(sys.argv) > 2: START = sys.argv[2]
     uni = universe()
     print("universe", len(uni), flush=True)
     uni.to_csv("universe.csv", index=False)

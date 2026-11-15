@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14213d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>매매 신호</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#14213d;--sub:#5c677d;--line:#e3e6ec;--accent:#1d4ed8;--buy:#0f766e;--sell:#b91c1c;--warn:#b45309;--chip:#eef1f6}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1420;--card:#19202e;--ink:#e8ecf4;--sub:#9aa5b8;--line:#2a3345;--accent:#7aa2ff;--buy:#4fd1c5;--sell:#f87171;--warn:#fbbf24;--chip:#232c3d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;padding-bottom:calc(72px + env(safe-area-inset-bottom))}
+header{background:#14213d;color:#fff;padding:14px 16px 12px}
+header h1{margin:0;font-size:18px}
+header p{margin:2px 0 0;font-size:12px;opacity:.8}
+main{padding:12px;max-width:640px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{margin:0 0 8px;font-size:16px}
+.card h3{margin:14px 0 6px;font-size:14px;color:var(--sub)}
+.sub{color:var(--sub);font-size:13px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:flex-start}
+.row:first-of-type{border-top:0}
+.row .l{min-width:0}.row .r{text-align:right;white-space:nowrap}
+.name{font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;background:var(--chip)}
+.b-buy{color:var(--buy)}.b-sell{color:var(--sell)}.b-warn{color:var(--warn)}.b-hold{color:var(--sub)}
+.state{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+label{display:block;font-size:13px;color:var(--sub);margin:8px 0 3px}
+input,select,button{font:inherit;color:inherit}
+input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+button{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:var(--chip);font-weight:600}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+button.small{padding:4px 10px;font-size:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{flex:1;border:0;border-radius:0;background:transparent;font-weight:600}
+.seg button.on{background:var(--accent);color:#fff}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:transparent;padding:12px 0 10px;font-size:13px;border-radius:0;color:var(--sub)}
+nav button.on{color:var(--accent);font-weight:800}
+.note{font-size:12px;color:var(--sub);margin-top:8px}
+.bar{height:8px;border-radius:4px;background:var(--chip);overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--accent)}
+ul{padding-left:18px;margin:6px 0}
+li{margin:3px 0}
+.hide{display:none}
+</style>
+</head>
+<body>
+<header><h1>매매 신호</h1><p id="asof">불러오는 중…</p></header>
+<main>
+<section id="t-sig"></section>
+<section id="t-hold" class="hide"></section>
+<section id="t-pen" class="hide"></section>
+<section id="t-info" class="hide"></section>
+</main>
+<nav>
+<button data-t="sig" class="on">오늘 신호</button>
+<button data-t="hold">내 보유</button>
+<button data-t="pen">퇴직연금</button>
+<button data-t="info">규칙·안내</button>
+</nav>
+<script>
+"use strict";
+let D = null;
+const mem = {};
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem("ss_" + k); return v === null ? (k in mem ? mem[k] : d) : JSON.parse(v); }catch(e){ return k in mem ? mem[k] : d; } },
+  set(k, v){ mem[k] = v; try{ localStorage.setItem("ss_" + k, JSON.stringify(v)); }catch(e){} }
+};
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const won = n => (n == null || isNaN(n)) ? "-" : Math.round(n).toLocaleString("ko-KR") + "원";
+const pct = (n, d = 1) => (n == null || isNaN(n)) ? "-" : (n > 0 ? "+" : "") + n.toFixed(d) + "%";
+const $ = id => document.getElementById(id);
+
+function addBiz(dateStr, n){           // 주말만 건너뜀(공휴일 미반영)
+  const d = new Date(dateStr + "T00:00:00");
+  while(n > 0){ d.setDate(d.getDate() + 1); const w = d.getDay(); if(w !== 0 && w !== 6) n--; }
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function todayStr(){ const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+
+function settings(){ return { invest: store.get("invest", 0), ratio: store.get("ratio", 20) }; }
+
+function renderSignals(){
+  const s = settings(), m = D.market, e = D.etf;
+  const stockBudget = s.invest * s.ratio / 100, etfBudget = s.invest - stockBudget, slot = stockBudget / 5;
+  const names = Object.fromEntries(e.assets.map(a => [a.code, a]));
+  const wrow = (w, budget) => Object.entries(w).sort((a, b) => b[1] - a[1]).map(([c, v]) => {
+    const a = names[c], amt = budget * v, sh = a ? Math.floor(amt / a.close) : 0;
+    return `<div class="row"><div class="l"><div class="name">${esc(a ? a.name : c)}</div><div class="sub">${esc(a ? a.cls : "")} · 현재가 ${won(a && a.close)}</div></div>
+      <div class="r"><div class="name num">${(v * 100).toFixed(0)}%</div>${s.invest ? `<div class="sub num">${won(amt)} · ${sh}주</div>` : ""}</div></div>`;
+  }).join("");
+  const sameW = JSON.stringify(Object.keys(e.confirmed.weights).sort()) === JSON.stringify(Object.keys(e.provisional.weights).sort());
+  const provTxt = Object.entries(e.provisional.weights).map(([c, v]) => `${esc(names[c] ? names[c].cls : c)} ${(v * 100).toFixed(0)}%`).join(", ");
+  const cands = D.candidates.map(c => {
+    const sh = slot ? Math.floor(slot / c.close) : null;
+    return `<div class="row"><div class="l"><div class="name">${esc(c.name)} <span class="sub">${esc(c.code)}</span></div>
+      <div class="sub">종가 ${won(c.close)} (${pct(c.chg)}) · 거래량 ${c.volx}배 · 6개월 ${pct(c.mom120, 0)}</div>
+      <div class="sub">손절가 ${won(c.stop)} (매수가 -8%)</div></div>
+      <div class="r">${m.on ? `<span class="badge b-buy">매수 후보</span>` : `<span class="badge b-hold">참고용</span>`}${sh !== null ? `<div class="sub num">${sh > 0 ? sh + "주 가능" : "1주 금액 초과"}</div>` : ""}</div></div>`;
+  }).join("") || `<p class="sub">오늘 조건을 충족한 종목이 없습니다.</p>`;
+  $("t-sig").innerHTML = `
+  <div class="card"><h2>시장 상태</h2>
+    <div class="state"><span class="dot" style="background:${m.on ? "var(--buy)" : "var(--sell)"}"></span>${m.on ? "개별 종목 신규 매수 가능" : "개별 종목 신규 매수 중단"}</div>
+    <p class="sub">코스피 ${m.kospi.toLocaleString()} · 60일선 ${m.ma60.toLocaleString()} · 200일선 ${m.ma200.toLocaleString()}<br>코스피가 두 이동평균선 위에 있을 때만 신규 매수합니다.</p></div>
+  <div class="card"><h2>내 설정</h2>
+    <div class="grid2"><div><label for="inv">총 투자금(원)</label><input id="inv" inputmode="numeric" value="${s.invest || ""}" placeholder="예: 5000000"></div>
+    <div><label>개별 종목 비중</label><div class="seg" id="ratio">${[20, 30, 50].map(r => `<button data-r="${r}" class="${s.ratio === r ? "on" : ""}">${r}%</button>`).join("")}</div></div></div>
+    ${s.invest ? `<p class="sub">ETF ${won(etfBudget)} · 개별 종목 ${won(stockBudget)} (종목당 ${won(slot)}, 최대 5종목)</p>` : `<p class="note">투자금을 입력하면 금액과 주수를 계산해 드립니다. 이 값은 이 기기에만 저장됩니다.</p>`}</div>
+  <div class="card"><h2>ETF 목표 비중 <span class="sub">(${esc(e.confirmed.date)} 월말 확정)</span></h2>
+    ${wrow(e.confirmed.weights, etfBudget)}
+    <p class="note">${sameW ? "오늘 기준으로도 같은 구성입니다." : "오늘(" + esc(e.provisional.date) + ") 기준 잠정: " + provTxt + ". 월말 종가에서 확정되며, 그 전에는 바꾸지 않습니다."}</p></div>
+  <div class="card"><h2>개별 종목 매수 후보 <span class="sub">(${D.n_signals}개 충족)</span></h2>
+    ${m.on ? "" : `<p class="sub b-warn">시장 필터가 꺼져 있어 지금은 매수하지 않습니다. 아래는 참고용입니다.</p>`}
+    ${cands}
+    <p class="note">52주 신고가 + 거래량 1.5배 이상 + 상승 추세 종목을 6개월 상승률 순으로 최대 10개 표시합니다. 다음 거래일 시가가 전일 종가보다 5% 넘게 뛰면 매수하지 않습니다.</p></div>`;
+  $("inv").addEventListener("change", ev => { store.set("invest", parseInt(ev.target.value.replace(/[^0-9]/g, "")) || 0); renderAll(); });
+  $("ratio").addEventListener("click", ev => { const r = ev.target.dataset.r; if(r){ store.set("ratio", +r); renderAll(); } });
+}
+
+function holdingSignal(h){
+  const st = D.stocks[h.code];
+  if(!st) return { name: h.code, txt: "시세 없음", cls: "b-hold", why: "수집 대상(시총 상위 600종목·ETF 8종)이 아닙니다." };
+  const [name, close, ma20] = st, etfA = D.etf.assets.find(a => a.code === h.code);
+  const pl = h.price ? (close / h.price - 1) * 100 : null;
+  let r;
+  if(etfA){
+    const w = D.etf.confirmed.weights[h.code];
+    r = w ? { txt: "보유", cls: "b-hold", why: `이번 달 목표 비중 ${(w * 100).toFixed(0)}%` } : { txt: "매도", cls: "b-sell", why: "이번 달 ETF 목표에 없습니다." };
+  } else {
+    const stop = h.price ? Math.floor(h.price * 0.92) : null;
+    if(stop && close <= stop) r = { txt: "손절", cls: "b-sell", why: `손절가 ${won(stop)} 이하입니다.` };
+    else if(ma20 && close < ma20) r = { txt: "매도", cls: "b-sell", why: `20일선(${won(ma20)}) 아래로 내려왔습니다.` };
+    else r = { txt: "보유", cls: "b-hold", why: `손절가 ${won(stop)} · 20일선 ${won(ma20)}` };
+  }
+  return Object.assign(r, { name, close, pl });
+}
+
+function renderHoldings(){
+  const hs = store.get("holdings", []);
+  const rows = hs.map((h, i) => { const g = holdingSignal(h);
+    return `<div class="row"><div class="l"><div class="name">${esc(g.name)} <span class="sub">${esc(h.code)}</span></div>
+      <div class="sub">${h.qty}주 · 매수가 ${won(h.price)} · 현재 ${won(g.close)} ${g.pl == null ? "" : "(" + pct(g.pl) + ")"}</div>
+      <div class="sub">${esc(g.why)}</div></div>
+      <div class="r"><span class="badge ${g.cls}">${g.txt}</span><div style="margin-top:6px"><button class="small" data-del="${i}">삭제</button></div></div></div>`; }).join("")
+    || `<p class="sub">등록된 보유 종목이 없습니다.</p>`;
+  const opts = Object.entries(D.stocks).map(([c, v]) => `<option value="${esc(v[0])} (${esc(c)})">`).join("");
+  $("t-hold").innerHTML = `
+  <div class="card"><h2>보유 종목 신호</h2>${rows}<p class="note">매도 신호는 종가 기준이며, 다음 거래일 시가에 매도하는 것으로 검증했습니다.</p></div>
+  <div class="card"><h2>보유 종목 추가</h2>
+    <label for="h-code">종목명 또는 6자리 코드</label><input id="h-code" list="codes" placeholder="예: 삼성전자"><datalist id="codes">${opts}</datalist>
+    <div class="grid2"><div><label for="h-qty">수량(주)</label><input id="h-qty" inputmode="numeric"></div><div><label for="h-price">평균 매수가(원)</label><input id="h-price" inputmode="numeric"></div></div>
+    <div style="margin-top:10px"><button class="primary" id="h-add">추가</button></div>
+    <p class="note">보유 내역은 이 기기에만 저장되고 서버로 전송되지 않습니다. 계좌번호나 비밀번호는 입력하지 마세요.</p></div>`;
+  $("h-add").addEventListener("click", () => {
+    const raw = $("h-code").value.trim(); let code = (raw.match(/\((\d{6})\)\s*$/) || raw.match(/^(\d{6})$/) || [])[1];
+    if(!code){ const f = Object.entries(D.stocks).find(([c, v]) => v[0] === raw); if(f) code = f[0]; }
+    const qty = parseInt($("h-qty").value.replace(/[^0-9]/g, "")) || 0, price = parseFloat($("h-price").value.replace(/[^0-9.]/g, "")) || 0;
+    if(!code || !qty){ $("h-code").focus(); return; }
+    const list = store.get("holdings", []); list.push({ code, qty, price }); store.set("holdings", list); renderHoldings();
+  });
+  $("t-hold").querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { const list = store.get("holdings", []); list.splice(+b.dataset.del, 1); store.set("holdings", list); renderHoldings(); }));
+}
+
+function renderPension(){
+  const p = D.pension, mode = store.get("pmode", "rot"), base = store.get("pdate", "") || todayStr();
+  const w = mode === "rot" ? p.confirmed.weights : p.fixed;
+  const risky = Object.entries(w).filter(([c]) => !["148070", "153130"].includes(c)).reduce((a, [, v]) => a + v, 0);
+  const rows = Object.entries(w).sort((a, b) => b[1] - a[1]).map(([c, v]) => { const f = p.funds[c] || { cls: c, funds: [], kind: "" };
+    const days = f.kind === "해외" ? [4, 9] : [3, 7];
+    return `<div class="row"><div class="l"><div class="name">${esc(f.cls)}</div><div class="sub">${f.funds.map(esc).join("<br>")}</div>
+      <div class="sub">매도 반영 ${addBiz(base, days[0])} · 매수 반영 ${addBiz(base, days[1])}</div></div>
+      <div class="r"><div class="name num">${(v * 100).toFixed(0)}%</div></div></div>`; }).join("");
+  const provTxt = Object.entries(p.provisional.weights).map(([c, v]) => `${esc((p.funds[c] || {}).cls || c)} ${(v * 100).toFixed(0)}%`).join(", ");
+  $("t-pen").innerHTML = `
+  <div class="card"><h2>퇴직연금 목표 비중</h2>
+    <div class="seg" id="pmode"><button data-m="rot" class="${mode === "rot" ? "on" : ""}">월별 순환</button><button data-m="fix" class="${mode === "fix" ? "on" : ""}">고정 분산</button></div>
+    <p class="sub" style="margin-top:8px">${mode === "rot" ? esc(p.confirmed.date) + " 월말 확정 신호입니다. 매월 첫 거래일에 바뀝니다." : "비중을 고정해 두고, 실제 비중이 5%p 이상 벗어났을 때만 조정하는 방식입니다."}</p>
+    ${rows}
+    <div style="margin-top:10px"><div class="sub">위험자산 합계 ${(risky * 100).toFixed(0)}% (한도 70%) · 안전자산 ${((1 - risky) * 100).toFixed(0)}%</div><div class="bar"><i style="width:${Math.min(100, risky / 0.7 * 100)}%"></i></div></div>
+    ${mode === "rot" ? `<p class="note">오늘(${esc(p.provisional.date)}) 기준 잠정: ${provTxt}. 월말에 확정됩니다.</p>` : ""}</div>
+  <div class="card"><h2>교체매매 예상 반영일</h2>
+    <label for="pdate">신청일</label><input type="date" id="pdate" value="${esc(base)}">
+    <p class="sub">2026년 6월 교체매매 이력 기준으로, 국내 펀드는 매도 3영업일·매수 7영업일 뒤, 해외 펀드는 매도 4영업일·매수 9영업일 뒤 기준가가 적용됩니다. 그 사이 4~5영업일은 현금 상태입니다.</p>
+    <p class="note">주말만 제외한 계산이며 공휴일과 펀드별 차이는 반영하지 않았습니다. 실제 일정은 공제회 매매내역에서 확인하세요.</p></div>
+  <div class="card"><h2>참고</h2><ul class="sub">
+    <li>주식형·금 펀드는 합계 70%까지만 담도록 계산합니다(안전자산 30% 이상 유지).</li>
+    <li>검증은 같은 자산의 ETF 시세로 했습니다. 실제 펀드는 보수와 추적 오차만큼 다릅니다.</li>
+    <li>이 앱은 주문을 내지 않습니다. 변경은 공제회 화면에서 직접 하셔야 합니다.</li></ul></div>`;
+  $("pmode").addEventListener("click", ev => { const m = ev.target.dataset.m; if(m){ store.set("pmode", m); renderPension(); } });
+  $("pdate").addEventListener("change", ev => { store.set("pdate", ev.target.value); renderPension(); });
+}
+
+function renderInfo(){
+  $("t-info").innerHTML = `
+  <div class="card"><h2>ETF 규칙 (월 1회)</h2><ul>
+    <li>대상: 코스피200, 코스닥150, 나스닥100, S&amp;P500(환헤지), 국고채10년, 금, 달러</li>
+    <li>매월 말 최근 1·3·6·12개월 수익률 평균이 높은 3개를 같은 비중으로 보유</li>
+    <li>점수가 단기채권보다 낮은 자리는 단기채권으로 대체</li>
+    <li>월말 종가로 판단하고 다음 거래일에 교체</li></ul></div>
+  <div class="card"><h2>개별 종목 규칙 (매일)</h2><ul>
+    <li>대상: 시가총액 상위 600종목(우선주·스팩·리츠 제외), 20일 평균 거래대금 20억 이상</li>
+    <li>매수: 종가가 200일선 위, 60일선이 200일선 위, 52주 신고가, 거래량이 20일 평균의 1.5배 이상</li>
+    <li>코스피가 60일선과 200일선 위일 때만 신규 매수, 최대 5종목</li>
+    <li>매도: 매수가 대비 -8% 손절 또는 종가가 20일선 아래</li></ul></div>
+  <div class="card"><h2>과거 검증 결과 (2015.1~2026.11)</h2>
+    <div class="row"><div class="l">개별 20%</div><div class="r num">연 13.2% · 최대 낙폭 -24.7%</div></div>
+    <div class="row"><div class="l">개별 30%</div><div class="r num">연 13.9% · 최대 낙폭 -29.1%</div></div>
+    <div class="row"><div class="l">개별 50%</div><div class="r num">연 15.2% · 최대 낙폭 -38.5%</div></div>
+    <div class="row"><div class="l">KODEX 200 보유</div><div class="r num">연 12.9% · 최대 낙폭 -46.9%</div></div>
+    <ul class="sub"><li>개별 종목 수익률은 현재 상위 종목만으로 검증해 과장돼 있습니다.</li><li>개별 종목 승률은 약 30%입니다. 작은 손절이 여러 번 이어지는 것이 정상입니다.</li><li>ETF 분배금은 반영하지 않았습니다.</li></ul></div>
+  <div class="card"><h2>유의사항</h2><p class="sub">이 앱은 정해진 규칙의 계산 결과를 보여주는 도구이며 투자 자문이 아닙니다. 과거 성과는 미래 수익을 보장하지 않고, 원금 손실이 발생할 수 있습니다. 시세는 네이버 금융 일봉을 매 거래일 장 마감 후 수집합니다.</p>
+    <p class="sub">데이터 생성: ${esc(D.generated)}</p></div>`;
+}
+
+function renderAll(){ renderSignals(); renderHoldings(); renderPension(); renderInfo(); }
+
+document.querySelector("nav").addEventListener("click", ev => {
+  const t = ev.target.dataset.t; if(!t) return;
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
+  ["sig", "hold", "pen", "info"].forEach(k => $("t-" + k).classList.toggle("hide", k !== t));
+  window.scrollTo(0, 0);
+});
+
+fetch("data.json?t=" + Date.now()).then(r => { if(!r.ok) throw new Error(r.status); return r.json(); }).then(d => {
+  D = d; $("asof").textContent = d.asof + " 종가 기준"; renderAll();
+}).catch(() => { $("asof").textContent = "데이터를 불러오지 못했습니다. 잠시 후 새로고침해 주세요."; });
+</script>
+</body>
+</html>
