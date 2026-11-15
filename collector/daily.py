@@ -57,6 +57,10 @@ def compute(px, uni):
     k = C["KOSPI"].dropna(); ma60, ma200 = k.rolling(60).mean().iloc[-1], k.rolling(200).mean().iloc[-1]
     market = {"kospi": round(float(k.iloc[-1]), 2), "ma60": round(float(ma60), 2), "ma200": round(float(ma200), 2),
               "on": bool(k.iloc[-1] > ma60 and k.iloc[-1] > ma200)}
+    if "KOSDAQ" in C.columns:                                          # 참고 정보(매수 판단에는 쓰지 않음)
+        q = C["KOSDAQ"].dropna(); q60, q200 = q.rolling(60).mean().iloc[-1], q.rolling(200).mean().iloc[-1]
+        market["kosdaq"] = {"close": round(float(q.iloc[-1]), 2), "ma60": round(float(q60), 2), "ma200": round(float(q200), 2),
+                            "on": bool(q.iloc[-1] > q60 and q.iloc[-1] > q200)}
     # ---- ETF 자산배분 ----
     E = C[[c for c in ETF_NAMES if c in C.columns]].ffill()
     m = E.resample("ME").last()
