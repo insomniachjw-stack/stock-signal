@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14213d">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>매매 신호</title>
+<title>내 자산 모니터</title>
 <style>
 :root{--bg:#f4f5f7;--card:#fff;--ink:#14213d;--sub:#5c677d;--line:#e3e6ec;--accent:#1d4ed8;--buy:#0f766e;--sell:#b91c1c;--warn:#b45309;--chip:#eef1f6}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1420;--card:#19202e;--ink:#e8ecf4;--sub:#9aa5b8;--line:#2a3345;--accent:#7aa2ff;--buy:#4fd1c5;--sell:#f87171;--warn:#fbbf24;--chip:#232c3d}}
@@ -47,189 +47,263 @@ nav button.on{color:var(--accent);font-weight:800}
 ul{padding-left:18px;margin:6px 0}
 li{margin:3px 0}
 .hide{display:none}
+.tap{cursor:pointer}
+canvas{width:100%;height:170px;display:block}
+.up{color:#d92d20}.dn{color:#1d4ed8}
+@media (prefers-color-scheme:dark){.up{color:#ff8a80}.dn{color:#7aa2ff}}
+.kv{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
+.kv div{background:var(--chip);border-radius:8px;padding:6px 4px;text-align:center;font-size:12px}
+.kv b{display:block;font-size:13px}
+.close{float:right}
+
 </style>
 </head>
 <body>
-<header><h1>매매 신호</h1><p id="asof">불러오는 중…</p></header>
+<header><h1>내 자산 모니터</h1><p id="asof">불러오는 중…</p></header>
 <main>
-<section id="t-sig"></section>
-<section id="t-hold" class="hide"></section>
-<section id="t-pen" class="hide"></section>
+<section id="t-pen"></section>
+<section id="t-stk" class="hide"></section>
+<section id="t-find" class="hide"></section>
 <section id="t-info" class="hide"></section>
 </main>
 <nav>
-<button data-t="sig" class="on">오늘 신호</button>
-<button data-t="hold">내 보유</button>
-<button data-t="pen">퇴직연금</button>
-<button data-t="info">규칙·안내</button>
+<button data-t="pen" class="on">퇴직연금</button>
+<button data-t="stk">주식</button>
+<button data-t="find">상품 찾기</button>
+<button data-t="info">시장·규칙</button>
 </nav>
 <script>
 "use strict";
-let D = null;
+let D = null, F = null; const FD = {};
 const mem = {};
 const store = {
   get(k, d){ try{ const v = localStorage.getItem("ss_" + k); return v === null ? (k in mem ? mem[k] : d) : JSON.parse(v); }catch(e){ return k in mem ? mem[k] : d; } },
   set(k, v){ mem[k] = v; try{ localStorage.setItem("ss_" + k, JSON.stringify(v)); }catch(e){} }
 };
-const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const won = n => (n == null || isNaN(n)) ? "-" : Math.round(n).toLocaleString("ko-KR") + "원";
-const pct = (n, d = 1) => (n == null || isNaN(n)) ? "-" : (n > 0 ? "+" : "") + n.toFixed(d) + "%";
+const pct = (n, d = 1) => (n == null || isNaN(n)) ? "-" : (n > 0 ? "+" : "") + Number(n).toFixed(d) + "%";
+const cls = n => n > 0 ? "up" : (n < 0 ? "dn" : "");
+const sp = (n, d = 2) => `<span class="num ${cls(n)}">${pct(n, d)}</span>`;
 const $ = id => document.getElementById(id);
-
-function addBiz(dateStr, n){           // 주말만 건너뜀(공휴일 미반영)
-  const d = new Date(dateStr + "T00:00:00");
-  while(n > 0){ d.setDate(d.getDate() + 1); const w = d.getDay(); if(w !== 0 && w !== 6) n--; }
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-}
+const num = v => parseFloat(String(v).replace(/[^0-9.]/g, "")) || 0;
+function addBiz(dateStr, n){ const d = new Date(dateStr + "T00:00:00"); while(n > 0){ d.setDate(d.getDate() + 1); const w = d.getDay(); if(w !== 0 && w !== 6) n--; } return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function todayStr(){ const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+const fundBy = name => F.funds.find(f => f.name === name);
+const score = f => { const r = f.ret || {}, v = ["1m", "3m", "6m", "1y"].map(k => r[k]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+async function detail(code){ if(!FD[code]){ try{ const r = await fetch("funds/" + code + ".json?t=" + F.asof); FD[code] = r.ok ? await r.json() : {}; }catch(e){ FD[code] = {}; } } return FD[code]; }
 
-function settings(){ return { invest: store.get("invest", 0), ratio: store.get("ratio", 20) }; }
-
-function renderSignals(){
-  const s = settings(), m = D.market, e = D.etf;
-  const stockBudget = s.invest * s.ratio / 100, etfBudget = s.invest - stockBudget, slot = stockBudget / 5;
-  const names = Object.fromEntries(e.assets.map(a => [a.code, a]));
-  const wrow = (w, budget) => Object.entries(w).sort((a, b) => b[1] - a[1]).map(([c, v]) => {
-    const a = names[c], amt = budget * v, sh = a ? Math.floor(amt / a.close) : 0;
-    return `<div class="row"><div class="l"><div class="name">${esc(a ? a.name : c)}</div><div class="sub">${esc(a ? a.cls : "")} · 현재가 ${won(a && a.close)}</div></div>
-      <div class="r"><div class="name num">${(v * 100).toFixed(0)}%</div>${s.invest ? `<div class="sub num">${won(amt)} · ${sh}주</div>` : ""}</div></div>`;
-  }).join("");
-  const sameW = JSON.stringify(Object.keys(e.confirmed.weights).sort()) === JSON.stringify(Object.keys(e.provisional.weights).sort());
-  const provTxt = Object.entries(e.provisional.weights).map(([c, v]) => `${esc(names[c] ? names[c].cls : c)} ${(v * 100).toFixed(0)}%`).join(", ");
-  const cands = D.candidates.map(c => {
-    const sh = slot ? Math.floor(slot / c.close) : null;
-    return `<div class="row"><div class="l"><div class="name">${esc(c.name)} <span class="sub">${esc(c.code)}</span></div>
-      <div class="sub">종가 ${won(c.close)} (${pct(c.chg)}) · 거래량 ${c.volx}배 · 6개월 ${pct(c.mom120, 0)}</div>
-      <div class="sub">손절가 ${won(c.stop)} (매수가 -8%)</div></div>
-      <div class="r">${m.on ? `<span class="badge b-buy">매수 후보</span>` : `<span class="badge b-hold">참고용</span>`}${sh !== null ? `<div class="sub num">${sh > 0 ? sh + "주 가능" : "1주 금액 초과"}</div>` : ""}</div></div>`;
-  }).join("") || `<p class="sub">오늘 조건을 충족한 종목이 없습니다.</p>`;
-  $("t-sig").innerHTML = `
-  <div class="card"><h2>시장 상태</h2>
-    <div class="state"><span class="dot" style="background:${m.on ? "var(--buy)" : "var(--sell)"}"></span>${m.on ? "개별 종목 신규 매수 가능" : "개별 종목 신규 매수 중단"}</div>
-    <p class="sub">코스피 ${m.kospi.toLocaleString()} · 60일선 ${m.ma60.toLocaleString()} · 200일선 ${m.ma200.toLocaleString()}<br>코스피가 두 이동평균선 위에 있을 때만 신규 매수합니다.</p>
-    ${m.kosdaq ? `<p class="sub">참고 · 코스닥 ${m.kosdaq.close.toLocaleString()} · 60일선 ${m.kosdaq.ma60.toLocaleString()} · 200일선 ${m.kosdaq.ma200.toLocaleString()} → <b>${m.kosdaq.on ? "추세 위" : "추세 아래"}</b><br>코스닥 지수는 참고용이며 매수 판단에는 쓰지 않습니다.</p>` : ""}</div>
-  <div class="card"><h2>내 설정</h2>
-    <div class="grid2"><div><label for="inv">총 투자금(원)</label><input id="inv" inputmode="numeric" value="${s.invest || ""}" placeholder="예: 5000000"></div>
-    <div><label>개별 종목 비중</label><div class="seg" id="ratio">${[20, 30, 50].map(r => `<button data-r="${r}" class="${s.ratio === r ? "on" : ""}">${r}%</button>`).join("")}</div></div></div>
-    ${s.invest ? `<p class="sub">ETF ${won(etfBudget)} · 개별 종목 ${won(stockBudget)} (종목당 ${won(slot)}, 최대 5종목)</p>` : `<p class="note">투자금을 입력하면 금액과 주수를 계산해 드립니다. 이 값은 이 기기에만 저장됩니다.</p>`}</div>
-  <div class="card"><h2>ETF 목표 비중 <span class="sub">(${esc(e.confirmed.date)} 월말 확정)</span></h2>
-    ${wrow(e.confirmed.weights, etfBudget)}
-    <p class="note">${sameW ? "오늘 기준으로도 같은 구성입니다." : "오늘(" + esc(e.provisional.date) + ") 기준 잠정: " + provTxt + ". 월말 종가에서 확정되며, 그 전에는 바꾸지 않습니다."}</p></div>
-  <div class="card"><h2>개별 종목 매수 후보 <span class="sub">(${D.n_signals}개 충족)</span></h2>
-    ${m.on ? "" : `<p class="sub b-warn">시장 필터가 꺼져 있어 지금은 매수하지 않습니다. 아래는 참고용입니다.</p>`}
-    ${cands}
-    <p class="note">52주 신고가 + 거래량 1.5배 이상 + 상승 추세 종목을 6개월 상승률 순으로 최대 10개 표시합니다. 다음 거래일 시가가 전일 종가보다 5% 넘게 뛰면 매수하지 않습니다.</p></div>`;
-  $("inv").addEventListener("change", ev => { store.set("invest", parseInt(ev.target.value.replace(/[^0-9]/g, "")) || 0); renderAll(); });
-  $("ratio").addEventListener("click", ev => { const r = ev.target.dataset.r; if(r){ store.set("ratio", +r); renderAll(); } });
+function drawLine(cv, pts){
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.documentElement), sub = css.getPropertyValue("--sub"), line = css.getPropertyValue("--line");
+  if(!pts || pts.length < 2){ g.fillStyle = sub; g.font = "13px sans-serif"; g.fillText("그래프 자료가 없습니다.", 8, 24); return; }
+  const ys = pts.map(p => p[1]), mn = Math.min(...ys), mx = Math.max(...ys), pad = (mx - mn) * 0.08 || 1, L = 6, R = 58, T = 10, Bm = 20;
+  const X = i => L + (w - L - R) * i / (pts.length - 1), Y = v => T + (h - T - Bm) * (1 - (v - mn + pad) / (mx - mn + 2 * pad));
+  g.strokeStyle = line; g.lineWidth = 1; g.fillStyle = sub; g.font = "11px sans-serif";
+  [mn, (mn + mx) / 2, mx].forEach(v => { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(w - R, Y(v)); g.stroke(); g.fillText(Math.round(v).toLocaleString(), w - R + 4, Y(v) + 4); });
+  g.fillText(pts[0][0], L, h - 5); const t = pts[pts.length - 1][0]; g.fillText(t, w - R - g.measureText(t).width, h - 5);
+  g.strokeStyle = ys[ys.length - 1] >= ys[0] ? "#d92d20" : "#1d4ed8"; g.lineWidth = 2; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(X(i), Y(p[1])) : g.moveTo(X(i), Y(p[1]))); g.stroke();
 }
 
+/* ---------- 퇴직연금 ---------- */
+function estToday(d){            // 구성종목(국내 주식)의 최근 거래일 등락으로 추정
+  let sum = 0, cov = 0; const items = [];
+  (d.holdings || []).forEach(h => { const m = /^KR7(\d{5}[0-9A-Z])00\d$/.exec(h.code || ""), st = m && D.stocks[m[1]];
+    const chg = st ? st[3] : null; if(chg != null){ sum += h.w * chg; cov += h.w; } items.push({ name: h.name, w: h.w, chg }); });
+  return { est: cov > 0 ? sum : null, cov, items };
+}
+function penHoldings(){ return store.get("pen", []); }
+function penValue(h){ const f = fundBy(h.name); return (f && f.nav && h.qty) ? h.qty * f.nav / 1000 : (h.amt || 0); }
+
+async function renderPension(){
+  const hs = penHoldings(), open = store.get("pen_open", "");
+  const total = hs.reduce((a, h) => a + penValue(h), 0), cost = hs.reduce((a, h) => a + (h.cost || 0), 0);
+  const risky = hs.reduce((a, h) => { const f = fundBy(h.name); return a + ((f && f.limit < 1) ? penValue(h) : 0); }, 0);
+  const rr = total ? risky / total : 0;
+  let dayChg = 0; hs.forEach(h => { const f = fundBy(h.name); if(f && f.nav && f.chg != null && h.qty) dayChg += h.qty * f.chg / 1000; });
+  const rows = hs.map((h, i) => { const f = fundBy(h.name), v = penValue(h), pl = h.cost ? (v / h.cost - 1) * 100 : null, sc = f && f.nav ? score(f) : null;
+    let tag = `<span class="badge b-hold">예금·기타</span>`;
+    if(f && f.nav){ tag = f.limit < 1 ? (sc != null && sc < 0 ? `<span class="badge b-warn">추세 약함</span>` : `<span class="badge b-buy">추세 유지</span>`) : `<span class="badge b-hold">안전자산</span>`; }
+    else if(f){ tag = `<span class="badge b-hold">시세 없음</span>`; }
+    return `<div class="row tap" data-open="${esc(h.name)}"><div class="l"><div class="name">${esc(h.name)}</div>
+      <div class="sub">평가 ${won(v)}${pl == null ? "" : " · 수익률 " + sp(pl, 1)} · 비중 ${total ? (v / total * 100).toFixed(0) : 0}%</div>
+      ${f && f.nav ? `<div class="sub">기준가 ${f.nav.toLocaleString()} (${esc(f.nav_date)}) · 전일 대비 ${sp(f.chg_pct)} · 3개월 ${sp(f.ret["3m"], 1)}</div>` : ""}</div>
+      <div class="r">${tag}<div style="margin-top:6px"><button class="small" data-del="${i}">삭제</button></div></div></div>`; }).join("") || `<p class="sub">아래에서 보유 상품을 추가해 주세요.</p>`;
+  const opts = F.funds.map(f => `<option value="${esc(f.name)}">`).join("");
+  $("t-pen").innerHTML = `
+  <div id="pen-detail"></div>
+  <div class="card"><h2>내 퇴직연금</h2>
+    <div class="state num">${won(total)}</div>
+    <p class="sub">${cost ? "투자원금 " + won(cost) + " · 평가손익 " + won(total - cost) + " (" + pct((total / cost - 1) * 100) + ")" : ""}${hs.length ? "<br>최근 기준가일 변동 " + won(dayChg) + " · 기준가 " + esc(F.asof) + " 공시분까지" : ""}</p>
+    ${hs.length ? `<div class="sub">위험자산 ${(rr * 100).toFixed(1)}% (한도 70%)</div><div class="bar"><i style="width:${Math.min(100, rr / 0.7 * 100)}%;background:${rr > 0.65 ? "var(--warn)" : "var(--accent)"}"></i></div>
+    ${rr > 0.7 ? `<p class="sub b-sell">위험자산이 70%를 넘었습니다. 주식형 추가 매수가 제한될 수 있습니다.</p>` : (rr > 0.65 ? `<p class="sub b-warn">위험자산 한도에 가깝습니다.</p>` : "")}
+    <h3>평가액 추이 (최근 1년, 현재 수량 기준)</h3><canvas id="pen-chart"></canvas>` : ""}
+    <h3>보유 상품 <span class="sub">(눌러서 상세 보기)</span></h3>${rows}
+    <p class="note">펀드 기준가는 하루 한 번, 1~2영업일 늦게 공시됩니다. 실시간 가격이 아닙니다.</p></div>
+  <div class="card"><h2>보유 상품 추가</h2>
+    <label for="p-name">상품명 (일부만 입력해도 목록이 나옵니다)</label><input id="p-name" list="fundlist" placeholder="예: KOSPI200"><datalist id="fundlist">${opts}</datalist>
+    <div class="grid2"><div><label for="p-qty">잔고수량(좌)</label><input id="p-qty" inputmode="numeric"></div><div><label for="p-cost">투자원금(원)</label><input id="p-cost" inputmode="numeric"></div></div>
+    <label for="p-amt">평가금액(원) — 정기예금·현금성 등 목록에 없는 상품만</label><input id="p-amt" inputmode="numeric">
+    <div style="margin-top:10px"><button class="primary" id="p-add">추가</button></div>
+    <p class="note">공제회 "상품별 투자현황" 화면의 잔고수량과 투자원금을 그대로 넣으면 됩니다. 이 기기에만 저장됩니다.</p></div>
+  <div class="card" id="pen-rec"></div>`;
+  $("p-add").addEventListener("click", () => { const name = $("p-name").value.trim(); if(!name) return $("p-name").focus();
+    const list = penHoldings(); list.push({ name, qty: num($("p-qty").value), cost: num($("p-cost").value), amt: num($("p-amt").value) }); store.set("pen", list); renderPension(); });
+  $("t-pen").querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", ev => { ev.stopPropagation(); const list = penHoldings(); list.splice(+b.dataset.del, 1); store.set("pen", list); renderPension(); }));
+  $("t-pen").querySelectorAll("[data-open]").forEach(r => r.addEventListener("click", () => showFund(r.dataset.open, "pen-detail")));
+  renderPenRec(hs, total);
+  if(hs.length){   // 평가액 추이: 보유 펀드 차트를 합산
+    const ds = await Promise.all(hs.map(h => { const f = fundBy(h.name); return (f && f.code && h.qty) ? detail(f.code) : null; }));
+    const dates = [...new Set(ds.flatMap(d => d && d.chart ? d.chart.map(p => p[0]) : []))].sort(), pts = [];
+    dates.forEach(dt => { let v = 0; hs.forEach((h, i) => { const d = ds[i]; if(d && d.chart && d.chart.length){ let p = null; for(const c of d.chart){ if(c[0] <= dt) p = c[1]; else break; } v += h.qty * (p == null ? d.chart[0][1] : p) / 1000; } else v += penValue(h); }); pts.push([dt, v]); });
+    if($("pen-chart")) drawLine($("pen-chart"), pts);
+  }
+}
+
+function renderPenRec(hs, total){
+  const p = D.pension, mode = store.get("pmode", "rot"), w = mode === "rot" ? p.confirmed.weights : p.fixed, base = store.get("pdate", "") || todayStr();
+  const tgt = Object.entries(w).sort((a, b) => b[1] - a[1]).map(([c, v]) => { const g = p.funds[c] || { cls: c, funds: [] };
+    const fl = g.funds.map(n => { const f = fundBy(n); return `<div class="sub">${esc(n)}${f && f.nav ? " · 3개월 " + pct(f.ret["3m"], 1) + " · 매수 T+" + f.buy_days + ", 환매 T+" + f.sell_days : ""}</div>`; }).join("");
+    return `<div class="row"><div class="l"><div class="name">${esc(g.cls)}</div>${fl}</div><div class="r"><div class="name num">${(v * 100).toFixed(0)}%</div>${total ? `<div class="sub num">${won(total * v)}</div>` : ""}</div></div>`; }).join("");
+  const weak = hs.map(h => fundBy(h.name)).filter(f => f && f.nav && f.limit < 1 && score(f) != null && score(f) < 0);
+  $("pen-rec").innerHTML = `<h2>교체 점검</h2>
+    ${hs.length ? (weak.length ? `<p class="sub b-warn">추세가 약한 보유 상품 ${weak.length}개: ${weak.map(f => esc(f.name.slice(0, 18)) + "…").join(", ")}</p>` : `<p class="sub">보유 위험자산 중 추세가 약한 상품이 없습니다.</p>`) : ""}
+    <p class="sub">"추세 약함"은 최근 1·3·6·12개월 수익률 평균이 0보다 낮다는 뜻입니다. 아래 목표 비중과 비교해 교체 여부를 판단하세요.</p>
+    <h3>규칙 기준 목표 비중</h3>
+    <div class="seg" id="pmode"><button data-m="rot" class="${mode === "rot" ? "on" : ""}">월별 순환</button><button data-m="fix" class="${mode === "fix" ? "on" : ""}">고정 분산</button></div>
+    <p class="sub" style="margin-top:8px">${mode === "rot" ? esc(p.confirmed.date) + " 월말 확정. 위험자산은 70% 이내로 계산합니다." : "비중을 고정하고 5%p 이상 벗어날 때만 조정하는 방식입니다."}</p>
+    ${tgt}
+    <h3>교체매매 예상 반영일</h3><label for="pdate">신청일</label><input type="date" id="pdate" value="${esc(base)}">
+    <p class="sub">국내 펀드: 매도 기준가 ${addBiz(base, 3)} → 매수 기준가 ${addBiz(base, 7)}<br>해외 펀드: 매도 기준가 ${addBiz(base, 4)} → 매수 기준가 ${addBiz(base, 9)}</p>
+    <p class="note">2026년 6월 실제 교체 이력 기준이며 주말만 제외했습니다. 그 사이 4~5영업일은 시장 밖(현금)입니다. 과거 검증에서 순환 방식과 고정 분산의 성과는 비슷했습니다(연 9~10%, 최대 낙폭 약 -19%). 이 화면은 규칙의 계산 결과이며 투자 권유가 아닙니다.</p>`;
+  $("pmode").addEventListener("click", ev => { const m = ev.target.dataset.m; if(m){ store.set("pmode", m); renderPenRec(hs, total); } });
+  $("pdate").addEventListener("change", ev => { store.set("pdate", ev.target.value); renderPenRec(hs, total); });
+}
+
+async function showFund(name, target){
+  const f = fundBy(name), box = $(target); if(!box) return;
+  if(!f || !f.nav){ box.innerHTML = `<div class="card"><button class="small close" data-x>닫기</button><h2>${esc(name)}</h2><p class="sub">${f ? "이 상품은 공개 시세와 연결하지 못했습니다. 공제회 화면에서 확인해 주세요." : "공제회 펀드 목록에 없는 상품입니다(예금 등)."}</p></div>`; box.querySelector("[data-x]").onclick = () => box.innerHTML = ""; box.scrollIntoView({ behavior: "smooth" }); return; }
+  const d = await detail(f.code), e = estToday(d), r = f.ret || {};
+  const pts = (d.chart || []).slice(); if(pts.length && pts[pts.length - 1][0] < f.nav_date) pts.push([f.nav_date, f.nav]);
+  box.innerHTML = `<div class="card"><button class="small close" data-x>닫기</button><h2>${esc(f.name)}</h2>
+    <p class="sub">${esc(f.company)} · ${esc(f.risk_name)} · ${esc(f.asset)}${f.hedge ? " · " + esc(f.hedge) : ""} · 투자한도 ${(f.limit * 100).toFixed(0)}%${f.match === "class" ? "<br>※ 같은 펀드의 다른 클래스 시세입니다. 보수 차이만큼 조금 다를 수 있습니다." : ""}</p>
+    <div class="state num">${f.nav.toLocaleString()} <span style="font-size:14px">${sp(f.chg_pct)}</span></div><p class="sub">${esc(f.nav_date)} 기준가 · 전일 대비 ${f.chg > 0 ? "+" : ""}${f.chg}</p>
+    <div class="kv">${[["1주", "1w"], ["1개월", "1m"], ["3개월", "3m"], ["6개월", "6m"], ["연초이후", "ytd"], ["1년", "1y"], ["3년", "3y"], ["5년", "5y"]].map(([t, k]) => `<div>${t}<b class="${cls(r[k])}">${pct(r[k], 1)}</b></div>`).join("")}</div>
+    <canvas id="fd-chart"></canvas>
+    <h3>구성 종목과 최근 거래일 등락</h3>
+    ${e.items.length ? e.items.slice(0, 10).map(x => `<div class="row"><div class="l">${esc(x.name)}</div><div class="r num">${(x.w * 100).toFixed(1)}% · ${x.chg == null ? '<span class="sub">시세 없음</span>' : sp(x.chg, 1)}</div></div>`).join("") : `<p class="sub">공시된 구성 종목이 없습니다.</p>`}
+    ${e.est != null ? `<p class="sub">위 종목(펀드의 ${(e.cov * 100).toFixed(0)}%)만으로 본 ${esc(D.asof)} 예상 기여: <b class="${cls(e.est)}">${pct(e.est, 2)}</b><br>기준가 공시 전 참고용 추정치이며 실제 기준가와 다를 수 있습니다.</p>` : `<p class="note">해외 종목이나 채권 위주라 당일 추정치를 계산하지 않았습니다.</p>`}
+    ${(d.assets || []).length ? `<h3>자산 구성</h3><p class="sub">${d.assets.map(a => esc(a.name) + " " + (a.w * 100).toFixed(0) + "%").join(" · ")}</p>` : ""}
+    <h3>매매 기준</h3><p class="sub">매수: 신청 후 ${f.buy_days}영업일째 기준가 · 환매: ${f.sell_days}영업일째 기준가, ${f.pay_days}영업일째 지급${f.bm ? "<br>비교지수: " + esc(f.bm) : ""}</p>
+    ${d.info ? `<p class="note">${esc(d.info)}</p>` : ""}</div>`;
+  box.querySelector("[data-x]").onclick = () => box.innerHTML = "";
+  drawLine($("fd-chart"), pts); box.scrollIntoView({ behavior: "smooth" });
+}
+
+/* ---------- 상품 찾기 ---------- */
+function renderFind(){
+  const q = store.get("f_q", ""), risk = store.get("f_risk", ""), sort = store.get("f_sort", "3m");
+  let list = F.funds.filter(f => (!risk || String(f.risk) === risk) && (!q || f.name.toLowerCase().includes(q.toLowerCase())));
+  const key = f => sort === "score" ? score(f) : (f.ret ? f.ret[sort] : null);
+  list = list.filter(f => f.nav).sort((a, b) => (key(b) == null ? -1e9 : key(b)) - (key(a) == null ? -1e9 : key(a))).concat(list.filter(f => !f.nav));
+  const grades = [...new Set(F.funds.map(f => f.risk + "|" + f.risk_name))].sort();
+  $("t-find").innerHTML = `<div id="find-detail"></div>
+  <div class="card"><h2>공제회 상품 찾기 <span class="sub">(${list.length}개)</span></h2>
+    <input id="f-q" placeholder="상품명 검색" value="${esc(q)}">
+    <div class="grid2" style="margin-top:8px"><select id="f-risk"><option value="">위험등급 전체</option>${grades.map(g => { const [n, t] = g.split("|"); return `<option value="${n}" ${risk === n ? "selected" : ""}>${n}등급 ${esc(t)}</option>`; }).join("")}</select>
+    <select id="f-sort">${[["1d", "전일 대비"], ["1w", "1주"], ["1m", "1개월"], ["3m", "3개월"], ["6m", "6개월"], ["1y", "1년"], ["score", "추세 점수"]].map(([k, t]) => `<option value="${k}" ${sort === k ? "selected" : ""}>${t} 높은 순</option>`).join("")}</select></div>
+    ${list.slice(0, 60).map(f => `<div class="row tap" data-open="${esc(f.name)}"><div class="l"><div class="name">${esc(f.name)}</div><div class="sub">${esc(f.risk_name)} · ${esc(f.asset)} · 한도 ${(f.limit * 100).toFixed(0)}%${f.nav ? " · 전일 " + pct(f.chg_pct) : " · 시세 없음"}</div></div>
+      <div class="r">${f.nav ? `<div class="name">${sp(key(f), 1)}</div><div class="sub num">${f.nav.toLocaleString()}</div>` : ""}</div></div>`).join("")}
+    ${list.length > 60 ? `<p class="note">상위 60개만 표시합니다. 검색이나 등급으로 좁혀 보세요.</p>` : ""}
+    <p class="note">기준가 ${esc(F.asof)} 공시분. 추세 점수는 1·3·6·12개월 수익률의 평균입니다. 과거 수익률이 높다고 앞으로도 오르는 것은 아닙니다.</p></div>`;
+  $("f-q").addEventListener("change", ev => { store.set("f_q", ev.target.value.trim()); renderFind(); });
+  $("f-risk").addEventListener("change", ev => { store.set("f_risk", ev.target.value); renderFind(); });
+  $("f-sort").addEventListener("change", ev => { store.set("f_sort", ev.target.value); renderFind(); });
+  $("t-find").querySelectorAll("[data-open]").forEach(r => r.addEventListener("click", () => showFund(r.dataset.open, "find-detail")));
+}
+
+/* ---------- 주식 ---------- */
+function settings(){ return { invest: store.get("invest", 0), ratio: store.get("ratio", 20) }; }
 function holdingSignal(h){
   const st = D.stocks[h.code];
   if(!st) return { name: h.code, txt: "시세 없음", cls: "b-hold", why: "수집 대상(시총 상위 600종목·ETF 8종)이 아닙니다." };
-  const [name, close, ma20] = st, etfA = D.etf.assets.find(a => a.code === h.code);
-  const pl = h.price ? (close / h.price - 1) * 100 : null;
-  let r;
-  if(etfA){
-    const w = D.etf.confirmed.weights[h.code];
-    r = w ? { txt: "보유", cls: "b-hold", why: `이번 달 목표 비중 ${(w * 100).toFixed(0)}%` } : { txt: "매도", cls: "b-sell", why: "이번 달 ETF 목표에 없습니다." };
-  } else {
-    const stop = h.price ? Math.floor(h.price * 0.92) : null;
+  const [name, close, ma20, chg] = st, etfA = D.etf.assets.find(a => a.code === h.code), pl = h.price ? (close / h.price - 1) * 100 : null; let r;
+  if(etfA){ const w = D.etf.confirmed.weights[h.code]; r = w ? { txt: "보유", cls: "b-hold", why: `이번 달 목표 비중 ${(w * 100).toFixed(0)}%` } : { txt: "매도", cls: "b-sell", why: "이번 달 ETF 목표에 없습니다." }; }
+  else { const stop = h.price ? Math.floor(h.price * 0.92) : null;
     if(stop && close <= stop) r = { txt: "손절", cls: "b-sell", why: `손절가 ${won(stop)} 이하입니다.` };
     else if(ma20 && close < ma20) r = { txt: "매도", cls: "b-sell", why: `20일선(${won(ma20)}) 아래로 내려왔습니다.` };
-    else r = { txt: "보유", cls: "b-hold", why: `손절가 ${won(stop)} · 20일선 ${won(ma20)}` };
-  }
-  return Object.assign(r, { name, close, pl });
+    else r = { txt: "보유", cls: "b-hold", why: `손절가 ${won(stop)} · 20일선 ${won(ma20)}` }; }
+  return Object.assign(r, { name, close, pl, chg });
 }
-
-function renderHoldings(){
-  const hs = store.get("holdings", []);
-  const rows = hs.map((h, i) => { const g = holdingSignal(h);
-    return `<div class="row"><div class="l"><div class="name">${esc(g.name)} <span class="sub">${esc(h.code)}</span></div>
-      <div class="sub">${h.qty}주 · 매수가 ${won(h.price)} · 현재 ${won(g.close)} ${g.pl == null ? "" : "(" + pct(g.pl) + ")"}</div>
-      <div class="sub">${esc(g.why)}</div></div>
-      <div class="r"><span class="badge ${g.cls}">${g.txt}</span><div style="margin-top:6px"><button class="small" data-del="${i}">삭제</button></div></div></div>`; }).join("")
-    || `<p class="sub">등록된 보유 종목이 없습니다.</p>`;
+function renderStocks(){
+  const s = settings(), m = D.market, e = D.etf, hs = store.get("holdings", []);
+  const stockBudget = s.invest * s.ratio / 100, etfBudget = s.invest - stockBudget, slot = stockBudget / 5;
+  const names = Object.fromEntries(e.assets.map(a => [a.code, a]));
+  let tv = 0, tc = 0; const sig = hs.map(h => { const g = holdingSignal(h); if(g.close){ tv += g.close * h.qty; tc += (h.price || 0) * h.qty; } return g; });
+  const rows = hs.map((h, i) => { const g = sig[i]; return `<div class="row"><div class="l"><div class="name">${esc(g.name)} <span class="sub">${esc(h.code)}</span></div>
+      <div class="sub">${h.qty}주 · 매수가 ${won(h.price)} · 현재 ${won(g.close)} ${g.chg == null ? "" : sp(g.chg, 1)}</div><div class="sub">수익률 ${sp(g.pl, 1)} · ${esc(g.why)}</div></div>
+      <div class="r"><span class="badge ${g.cls}">${g.txt}</span><div style="margin-top:6px"><button class="small" data-del="${i}">삭제</button></div></div></div>`; }).join("") || `<p class="sub">등록된 보유 종목이 없습니다.</p>`;
+  const wrow = (w, budget) => Object.entries(w).sort((a, b) => b[1] - a[1]).map(([c, v]) => { const a = names[c], amt = budget * v, sh = a ? Math.floor(amt / a.close) : 0;
+    return `<div class="row"><div class="l"><div class="name">${esc(a ? a.name : c)}</div><div class="sub">${esc(a ? a.cls : "")} · 현재가 ${won(a && a.close)}</div></div><div class="r"><div class="name num">${(v * 100).toFixed(0)}%</div>${s.invest ? `<div class="sub num">${won(amt)} · ${sh}주</div>` : ""}</div></div>`; }).join("");
+  const provTxt = Object.entries(e.provisional.weights).map(([c, v]) => `${esc(names[c] ? names[c].cls : c)} ${(v * 100).toFixed(0)}%`).join(", ");
+  const cands = D.candidates.map(c => { const sh = slot ? Math.floor(slot / c.close) : null;
+    return `<div class="row"><div class="l"><div class="name">${esc(c.name)} <span class="sub">${esc(c.code)}</span></div><div class="sub">종가 ${won(c.close)} (${pct(c.chg)}) · 거래량 ${c.volx}배 · 6개월 ${pct(c.mom120, 0)}</div><div class="sub">손절가 ${won(c.stop)} (매수가 -8%)</div></div>
+      <div class="r">${m.on ? `<span class="badge b-buy">교체 후보</span>` : `<span class="badge b-hold">참고용</span>`}${sh !== null ? `<div class="sub num">${sh > 0 ? sh + "주 가능" : "1주 금액 초과"}</div>` : ""}</div></div>`; }).join("") || `<p class="sub">오늘 조건을 충족한 종목이 없습니다.</p>`;
   const opts = Object.entries(D.stocks).map(([c, v]) => `<option value="${esc(v[0])} (${esc(c)})">`).join("");
-  $("t-hold").innerHTML = `
-  <div class="card"><h2>보유 종목 신호</h2>${rows}<p class="note">매도 신호는 종가 기준이며, 다음 거래일 시가에 매도하는 것으로 검증했습니다.</p></div>
+  $("t-stk").innerHTML = `
+  <div class="card"><h2>내 주식</h2>${hs.length ? `<div class="state num">${won(tv)}</div><p class="sub">매수금액 ${won(tc)} · 평가손익 ${won(tv - tc)} ${tc ? "(" + pct((tv / tc - 1) * 100) + ")" : ""}</p>` : ""}${rows}
+    <p class="note">${esc(D.asof)} 종가 기준입니다. 매도 신호가 뜨면 다음 거래일 시가에 매도하는 것으로 검증했습니다.</p></div>
   <div class="card"><h2>보유 종목 추가</h2>
     <label for="h-code">종목명 또는 6자리 코드</label><input id="h-code" list="codes" placeholder="예: 삼성전자"><datalist id="codes">${opts}</datalist>
     <div class="grid2"><div><label for="h-qty">수량(주)</label><input id="h-qty" inputmode="numeric"></div><div><label for="h-price">평균 매수가(원)</label><input id="h-price" inputmode="numeric"></div></div>
-    <div style="margin-top:10px"><button class="primary" id="h-add">추가</button></div>
-    <p class="note">보유 내역은 이 기기에만 저장되고 서버로 전송되지 않습니다. 계좌번호나 비밀번호는 입력하지 마세요.</p></div>`;
-  $("h-add").addEventListener("click", () => {
-    const raw = $("h-code").value.trim(); let code = (raw.match(/\((\d{6})\)\s*$/) || raw.match(/^(\d{6})$/) || [])[1];
+    <div style="margin-top:10px"><button class="primary" id="h-add">추가</button></div><p class="note">이 기기에만 저장됩니다. 계좌번호나 비밀번호는 입력하지 마세요. 미국 주식은 아직 지원하지 않습니다.</p></div>
+  <div class="card"><h2>교체 후보 <span class="sub">(${D.n_signals}개 충족)</span></h2>
+    <div class="state"><span class="dot" style="background:${m.on ? "var(--buy)" : "var(--sell)"}"></span>${m.on ? "신규 매수 가능" : "신규 매수 중단"}</div>
+    ${m.on ? `<p class="sub">매도·손절 신호가 난 종목을 정리한 자리에 아래 후보를 검토합니다.</p>` : `<p class="sub b-warn">코스피가 60일선·200일선 아래입니다. 매도한 자리는 현금으로 두는 것이 규칙입니다.</p>`}${cands}
+    <p class="note">52주 신고가 + 거래량 1.5배 이상 + 상승 추세 종목을 6개월 상승률 순으로 표시합니다.</p></div>
+  <div class="card"><h2>ETF 목표 비중 <span class="sub">(${esc(e.confirmed.date)} 확정)</span></h2>
+    <div class="grid2"><div><label for="inv">총 투자금(원)</label><input id="inv" inputmode="numeric" value="${s.invest || ""}" placeholder="예: 5000000"></div>
+    <div><label>개별 종목 비중</label><div class="seg" id="ratio">${[20, 30, 50].map(r => `<button data-r="${r}" class="${s.ratio === r ? "on" : ""}">${r}%</button>`).join("")}</div></div></div>
+    ${wrow(e.confirmed.weights, etfBudget)}<p class="note">오늘(${esc(e.provisional.date)}) 기준 잠정: ${provTxt}. 월말에 확정됩니다.</p></div>`;
+  $("h-add").addEventListener("click", () => { const raw = $("h-code").value.trim(); let code = (raw.match(/\((\d{6})\)\s*$/) || raw.match(/^(\d{6})$/) || [])[1];
     if(!code){ const f = Object.entries(D.stocks).find(([c, v]) => v[0] === raw); if(f) code = f[0]; }
-    const qty = parseInt($("h-qty").value.replace(/[^0-9]/g, "")) || 0, price = parseFloat($("h-price").value.replace(/[^0-9.]/g, "")) || 0;
-    if(!code || !qty){ $("h-code").focus(); return; }
-    const list = store.get("holdings", []); list.push({ code, qty, price }); store.set("holdings", list); renderHoldings();
-  });
-  $("t-hold").querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { const list = store.get("holdings", []); list.splice(+b.dataset.del, 1); store.set("holdings", list); renderHoldings(); }));
+    const qty = Math.floor(num($("h-qty").value)), price = num($("h-price").value); if(!code || !qty) return $("h-code").focus();
+    const list = store.get("holdings", []); list.push({ code, qty, price }); store.set("holdings", list); renderStocks(); });
+  $("t-stk").querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", () => { const list = store.get("holdings", []); list.splice(+b.dataset.del, 1); store.set("holdings", list); renderStocks(); }));
+  $("inv").addEventListener("change", ev => { store.set("invest", Math.floor(num(ev.target.value))); renderStocks(); });
+  $("ratio").addEventListener("click", ev => { const r = ev.target.dataset.r; if(r){ store.set("ratio", +r); renderStocks(); } });
 }
 
-function renderPension(){
-  const p = D.pension, mode = store.get("pmode", "rot"), base = store.get("pdate", "") || todayStr();
-  const w = mode === "rot" ? p.confirmed.weights : p.fixed;
-  const risky = Object.entries(w).filter(([c]) => !["148070", "153130"].includes(c)).reduce((a, [, v]) => a + v, 0);
-  const rows = Object.entries(w).sort((a, b) => b[1] - a[1]).map(([c, v]) => { const f = p.funds[c] || { cls: c, funds: [], kind: "" };
-    const days = f.kind === "해외" ? [4, 9] : [3, 7];
-    return `<div class="row"><div class="l"><div class="name">${esc(f.cls)}</div><div class="sub">${f.funds.map(esc).join("<br>")}</div>
-      <div class="sub">매도 반영 ${addBiz(base, days[0])} · 매수 반영 ${addBiz(base, days[1])}</div></div>
-      <div class="r"><div class="name num">${(v * 100).toFixed(0)}%</div></div></div>`; }).join("");
-  const provTxt = Object.entries(p.provisional.weights).map(([c, v]) => `${esc((p.funds[c] || {}).cls || c)} ${(v * 100).toFixed(0)}%`).join(", ");
-  $("t-pen").innerHTML = `
-  <div class="card"><h2>퇴직연금 목표 비중</h2>
-    <div class="seg" id="pmode"><button data-m="rot" class="${mode === "rot" ? "on" : ""}">월별 순환</button><button data-m="fix" class="${mode === "fix" ? "on" : ""}">고정 분산</button></div>
-    <p class="sub" style="margin-top:8px">${mode === "rot" ? esc(p.confirmed.date) + " 월말 확정 신호입니다. 매월 첫 거래일에 바뀝니다." : "비중을 고정해 두고, 실제 비중이 5%p 이상 벗어났을 때만 조정하는 방식입니다."}</p>
-    ${rows}
-    <div style="margin-top:10px"><div class="sub">위험자산 합계 ${(risky * 100).toFixed(0)}% (한도 70%) · 안전자산 ${((1 - risky) * 100).toFixed(0)}%</div><div class="bar"><i style="width:${Math.min(100, risky / 0.7 * 100)}%"></i></div></div>
-    ${mode === "rot" ? `<p class="note">오늘(${esc(p.provisional.date)}) 기준 잠정: ${provTxt}. 월말에 확정됩니다.</p>` : ""}</div>
-  <div class="card"><h2>교체매매 예상 반영일</h2>
-    <label for="pdate">신청일</label><input type="date" id="pdate" value="${esc(base)}">
-    <p class="sub">2026년 6월 교체매매 이력 기준으로, 국내 펀드는 매도 3영업일·매수 7영업일 뒤, 해외 펀드는 매도 4영업일·매수 9영업일 뒤 기준가가 적용됩니다. 그 사이 4~5영업일은 현금 상태입니다.</p>
-    <p class="note">주말만 제외한 계산이며 공휴일과 펀드별 차이는 반영하지 않았습니다. 실제 일정은 공제회 매매내역에서 확인하세요.</p></div>
-  <div class="card"><h2>참고</h2><ul class="sub">
-    <li>주식형·금 펀드는 합계 70%까지만 담도록 계산합니다(안전자산 30% 이상 유지).</li>
-    <li>검증은 같은 자산의 ETF 시세로 했습니다. 실제 펀드는 보수와 추적 오차만큼 다릅니다.</li>
-    <li>이 앱은 주문을 내지 않습니다. 변경은 공제회 화면에서 직접 하셔야 합니다.</li></ul></div>`;
-  $("pmode").addEventListener("click", ev => { const m = ev.target.dataset.m; if(m){ store.set("pmode", m); renderPension(); } });
-  $("pdate").addEventListener("change", ev => { store.set("pdate", ev.target.value); renderPension(); });
-}
-
+/* ---------- 시장·규칙 ---------- */
 function renderInfo(){
+  const m = D.market, st = on => on ? `<span class="badge b-buy">추세 위</span>` : `<span class="badge b-sell">추세 아래</span>`;
   $("t-info").innerHTML = `
-  <div class="card"><h2>ETF 규칙 (월 1회)</h2><ul>
-    <li>대상: 코스피200, 코스닥150, 나스닥100, S&amp;P500(환헤지), 국고채10년, 금, 달러</li>
-    <li>매월 말 최근 1·3·6·12개월 수익률 평균이 높은 3개를 같은 비중으로 보유</li>
-    <li>점수가 단기채권보다 낮은 자리는 단기채권으로 대체</li>
-    <li>월말 종가로 판단하고 다음 거래일에 교체</li></ul></div>
-  <div class="card"><h2>개별 종목 규칙 (매일)</h2><ul>
-    <li>대상: 시가총액 상위 600종목(우선주·스팩·리츠 제외), 20일 평균 거래대금 20억 이상</li>
-    <li>매수: 종가가 200일선 위, 60일선이 200일선 위, 52주 신고가, 거래량이 20일 평균의 1.5배 이상</li>
-    <li>코스피가 60일선과 200일선 위일 때만 신규 매수, 최대 5종목</li>
-    <li>매도: 매수가 대비 -8% 손절 또는 종가가 20일선 아래</li></ul></div>
-  <div class="card"><h2>과거 검증 결과 (2015.1~2026.11)</h2>
-    <div class="row"><div class="l">개별 20%</div><div class="r num">연 13.2% · 최대 낙폭 -24.7%</div></div>
-    <div class="row"><div class="l">개별 30%</div><div class="r num">연 13.9% · 최대 낙폭 -29.1%</div></div>
-    <div class="row"><div class="l">개별 50%</div><div class="r num">연 15.2% · 최대 낙폭 -38.5%</div></div>
-    <div class="row"><div class="l">KODEX 200 보유</div><div class="r num">연 12.9% · 최대 낙폭 -46.9%</div></div>
-    <ul class="sub"><li>개별 종목 수익률은 현재 상위 종목만으로 검증해 과장돼 있습니다.</li><li>개별 종목 승률은 약 30%입니다. 작은 손절이 여러 번 이어지는 것이 정상입니다.</li><li>ETF 분배금은 반영하지 않았습니다.</li></ul></div>
-  <div class="card"><h2>유의사항</h2><p class="sub">이 앱은 정해진 규칙의 계산 결과를 보여주는 도구이며 투자 자문이 아닙니다. 과거 성과는 미래 수익을 보장하지 않고, 원금 손실이 발생할 수 있습니다. 시세는 네이버 금융 일봉을 매 거래일 장 마감 후 수집합니다.</p>
-    <p class="sub">데이터 생성: ${esc(D.generated)}</p></div>`;
+  <div class="card"><h2>시장 상태 <span class="sub">(${esc(D.asof)} 종가)</span></h2>
+    <div class="row"><div class="l"><div class="name">코스피 ${m.kospi.toLocaleString()}</div><div class="sub">60일선 ${m.ma60.toLocaleString()} · 200일선 ${m.ma200.toLocaleString()}</div></div><div class="r">${st(m.on)}</div></div>
+    ${m.kosdaq ? `<div class="row"><div class="l"><div class="name">코스닥 ${m.kosdaq.close.toLocaleString()}</div><div class="sub">60일선 ${m.kosdaq.ma60.toLocaleString()} · 200일선 ${m.kosdaq.ma200.toLocaleString()}</div></div><div class="r">${st(m.kosdaq.on)}</div></div>` : ""}
+    <h3>자산별 추세 점수 (1·3·6·12개월 수익률 평균)</h3>
+    ${D.etf.assets.slice().sort((a, b) => (b.score_now || -99) - (a.score_now || -99)).map(a => `<div class="row"><div class="l">${esc(a.cls)}</div><div class="r">${sp(a.score_now, 1)}</div></div>`).join("")}</div>
+  <div class="card"><h2>이 앱이 하는 일</h2><ul>
+    <li>내가 입력한 퇴직연금 상품과 주식을 저장하고 변동을 보여줍니다.</li><li>정해진 규칙으로 교체를 검토할 시점을 표시합니다.</li><li>주문은 내지 않습니다. 교체는 공제회·증권사 화면에서 직접 합니다.</li></ul></div>
+  <div class="card"><h2>규칙</h2><h3>퇴직연금·ETF (월 1회)</h3><ul><li>1·3·6·12개월 수익률 평균이 높은 자산 3개를 같은 비중으로 보유</li><li>점수가 단기채권보다 낮으면 안전자산으로 대체</li><li>퇴직연금은 위험자산 70% 이내</li></ul>
+    <h3>개별 종목 (매일)</h3><ul><li>매도: 매수가 대비 -8% 손절 또는 종가가 20일선 아래</li><li>교체 후보: 52주 신고가 + 거래량 1.5배 + 상승 추세, 코스피가 60일선·200일선 위일 때만</li></ul></div>
+  <div class="card"><h2>과거 검증 (2015.1~2026.11)</h2>
+    <div class="row"><div class="l">ETF 80% + 개별 20%</div><div class="r num">연 13.2% · 낙폭 -24.7%</div></div><div class="row"><div class="l">ETF 70% + 개별 30%</div><div class="r num">연 13.9% · 낙폭 -29.1%</div></div>
+    <div class="row"><div class="l">ETF 50% + 개별 50%</div><div class="r num">연 15.2% · 낙폭 -38.5%</div></div><div class="row"><div class="l">퇴직연금 규칙(지연 반영)</div><div class="r num">연 9~10% · 낙폭 약 -19%</div></div>
+    <div class="row"><div class="l">KODEX 200 보유</div><div class="r num">연 12.9% · 낙폭 -46.9%</div></div>
+    <ul class="sub"><li>개별 종목 수익률은 현재 상위 종목만으로 검증해 과장돼 있고, 조건에 따라 크게 흔들렸습니다.</li><li>올해 급락은 이 규칙도 다 피하지 못했습니다.</li></ul></div>
+  <div class="card"><h2>유의사항</h2><p class="sub">이 앱은 규칙의 계산 결과를 보여주는 도구이며 투자 자문이 아닙니다. 과거 성과는 미래 수익을 보장하지 않고 원금 손실이 발생할 수 있습니다. 주식 시세는 평일 16:40, 펀드 기준가는 화~토 오전에 네이버 증권에서 수집합니다. 공제회 상품 205개 중 6개는 공개 시세와 연결하지 못했습니다.</p><p class="sub">주식 데이터 생성: ${esc(D.generated)}</p></div>`;
 }
 
-function renderAll(){ renderSignals(); renderHoldings(); renderPension(); renderInfo(); }
-
-document.querySelector("nav").addEventListener("click", ev => {
-  const t = ev.target.dataset.t; if(!t) return;
+function renderAll(){ renderPension(); renderStocks(); renderFind(); renderInfo(); }
+document.querySelector("nav").addEventListener("click", ev => { const t = ev.target.dataset.t; if(!t) return;
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
-  ["sig", "hold", "pen", "info"].forEach(k => $("t-" + k).classList.toggle("hide", k !== t));
-  window.scrollTo(0, 0);
-});
-
-fetch("data.json?t=" + Date.now()).then(r => { if(!r.ok) throw new Error(r.status); return r.json(); }).then(d => {
-  D = d; $("asof").textContent = d.asof + " 종가 기준"; renderAll();
-}).catch(() => { $("asof").textContent = "데이터를 불러오지 못했습니다. 잠시 후 새로고침해 주세요."; });
+  ["pen", "stk", "find", "info"].forEach(k => $("t-" + k).classList.toggle("hide", k !== t)); window.scrollTo(0, 0);
+  if(t === "pen") renderPension(); });
+const J = u => fetch(u + "?t=" + Date.now()).then(r => { if(!r.ok) throw new Error(r.status); return r.json(); });
+Promise.all([J("data.json"), J("funds.json")]).then(([d, f]) => { D = d; F = f; $("asof").textContent = "주식 " + d.asof + " 종가 · 펀드 기준가 " + f.asof; renderAll(); })
+  .catch(() => { $("asof").textContent = "데이터를 불러오지 못했습니다. 잠시 후 새로고침해 주세요."; });
 </script>
 </body>
 </html>

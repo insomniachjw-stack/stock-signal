@@ -57,7 +57,7 @@ def one(row, m):
     base.update({"nav": float(d["basePrice"]), "nav_date": d.get("tradeDate"), "chg": d.get("changePrice"),
                  "chg_pct": None if d.get("returnIndex") is None else round(d["returnIndex"], 2), "ret": rets,
                  "bm": d.get("benchmarkName"), "group": d.get("peerGroupName"), "matched": m.get("matched")})
-    chart = get("/fund/basePrice/chart", fundCode=code, term="1y")
+    chart = get("/fund/return/chart", fundCode=code, term="1y")   # 기준가는 결산 때 1,000으로 재설정되므로 수익률 차트를 쓴다
     term = get("/fund/term/list", fundCode=code) or {}
     alloc = get("/fund/portfolio/allocation", fundCode=code) or {}
     hold = alloc.get("result") if isinstance(alloc, dict) else alloc
@@ -73,14 +73,13 @@ def one(row, m):
     return base, detail
 
 def chart_points(raw):
-    """차트 응답에서 [날짜, 기준가] 목록을 뽑는다(응답 구조가 바뀌어도 견디도록 탐색)."""
+    """수익률 차트 응답에서 [날짜, 지수(시작=100)] 목록을 만든다. 값은 기간 시작 대비 누적수익률(%)."""
     pts = []
     def walk(o):
         if isinstance(o, dict):
-            dk = next((k for k in ("tradeDate", "date", "localDate") if k in o), None); pk = next((k for k in ("basePrice", "price", "value") if k in o), None)
-            if dk and pk and o[pk] is not None:
-                try: pts.append([str(o[dk])[:10], float(o[pk])])
-                except Exception: pass
+            dk = next((k for k in ("tradeDate", "date", "localDate") if k in o), None)
+            rk = "fundReturn" if "fundReturn" in o else next((k for k in o if "eturn" in k and isinstance(o[k], (int, float))), None)
+            if dk and rk and o[rk] is not None: pts.append([str(o[dk])[:10], round(100 + float(o[rk]), 3)])
             else:
                 for v in o.values(): walk(v)
         elif isinstance(o, list):
