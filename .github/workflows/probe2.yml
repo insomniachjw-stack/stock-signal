@@ -1,0 +1,11 @@
+name: probe2
+on:
+  push:
+    paths: ["tools/probe2.py", ".github/workflows/probe2.yml"]
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q requests && python tools/probe2.py
