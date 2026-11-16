@@ -147,7 +147,18 @@ async function renderPension(){
     <label for="p-amt">평가금액(원) — 정기예금·현금성 등 목록에 없는 상품만</label><input id="p-amt" inputmode="numeric">
     <div style="margin-top:10px"><button class="primary" id="p-add">추가</button></div>
     <p class="note">공제회 "상품별 투자현황" 화면의 잔고수량과 투자원금을 그대로 넣으면 됩니다. 이 기기에만 저장됩니다.</p></div>
+  <div class="card"><h2>한 번에 가져오기</h2>
+    <label for="p-imp">가져오기 코드 붙여넣기 (한 줄에 상품명 | 잔고수량 | 투자원금 | 평가금액)</label>
+    <textarea id="p-imp" rows="4" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit;font:inherit"></textarea>
+    <div style="margin-top:10px"><button class="primary" id="p-imp-go">가져오기 (기존 목록 교체)</button> <span class="sub" id="p-imp-msg"></span></div>
+    <p class="note">투자현황 캡처를 Claude 대화에 올리면 이 코드를 만들어 드립니다. 이 기기에만 저장됩니다.</p></div>
   <div class="card" id="pen-rec"></div>`;
+  $("p-imp-go").addEventListener("click", () => {
+    const list = $("p-imp").value.split(/\n/).map(l => l.split("|").map(x => x.trim())).filter(a => a.length >= 2 && a[0])
+      .map(a => ({ name: a[0], qty: num(a[1]), cost: num(a[2] || 0), amt: num(a[3] || 0) }));
+    if(!list.length){ $("p-imp-msg").textContent = "읽을 수 있는 줄이 없습니다."; return; }
+    store.set("pen", list); renderPension();
+  });
   $("p-add").addEventListener("click", () => { const name = $("p-name").value.trim(); if(!name) return $("p-name").focus();
     const list = penHoldings(); list.push({ name, qty: num($("p-qty").value), cost: num($("p-cost").value), amt: num($("p-amt").value) }); store.set("pen", list); renderPension(); });
   $("t-pen").querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", ev => { ev.stopPropagation(); const list = penHoldings(); list.splice(+b.dataset.del, 1); store.set("pen", list); renderPension(); }));
