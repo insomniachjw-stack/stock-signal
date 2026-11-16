@@ -191,6 +191,7 @@ async function showFund(name, target){
     <div class="state num">${f.nav.toLocaleString()} <span style="font-size:14px">${sp(f.chg_pct)}</span></div><p class="sub">${esc(f.nav_date)} 기준가 · 전일 대비 ${f.chg > 0 ? "+" : ""}${f.chg}</p>
     <div class="kv">${[["1주", "1w"], ["1개월", "1m"], ["3개월", "3m"], ["6개월", "6m"], ["연초이후", "ytd"], ["1년", "1y"], ["3년", "3y"], ["5년", "5y"]].map(([t, k]) => `<div>${t}<b class="${cls(r[k])}">${pct(r[k], 1)}</b></div>`).join("")}</div>
     <canvas id="fd-chart"></canvas>
+    ${d.adjusted ? `<p class="note">결산으로 기준가가 재설정된 펀드라, 그래프는 공시 수익률에 맞춰 보정한 값입니다.</p>` : ""}
     <h3>구성 종목과 최근 거래일 등락</h3>
     ${e.items.length ? e.items.slice(0, 10).map(x => `<div class="row"><div class="l">${esc(x.name)}</div><div class="r num">${(x.w * 100).toFixed(1)}% · ${x.chg == null ? '<span class="sub">시세 없음</span>' : sp(x.chg, 1)}</div></div>`).join("") : `<p class="sub">공시된 구성 종목이 없습니다.</p>`}
     ${e.est != null ? `<p class="sub">위 종목(펀드의 ${(e.cov * 100).toFixed(0)}%)만으로 본 ${esc(D.asof)} 예상 기여: <b class="${cls(e.est)}">${pct(e.est, 2)}</b><br>기준가 공시 전 참고용 추정치이며 실제 기준가와 다를 수 있습니다.</p>` : `<p class="note">해외 종목이나 채권 위주라 당일 추정치를 계산하지 않았습니다.</p>`}

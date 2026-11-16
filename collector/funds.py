@@ -72,19 +72,31 @@ def one(row, m):
     base["top"] = hold[:5]
     return base, detail
 
-def chart_points(raw):
-    """수익률 차트 응답에서 [날짜, 지수(시작=100)] 목록을 만든다. 값은 기간 시작 대비 누적수익률(%)."""
+def chart_points(raw, rep1y):
+    """주간 기준가 목록을 [날짜, 수정기준가]로 만든다.
+    펀드는 결산 때 기준가가 1,000 근처로 재설정되므로, 공시된 1년 수익률과 어긋나면
+    벤치마크 대비 가장 크게 꺾인 주를 결산 주로 보고 그 이전 값을 보정한다."""
+    ser = (raw or {}).get("series") or []
     pts = []
-    def walk(o):
-        if isinstance(o, dict):
-            dk = next((k for k in ("tradeDate", "date", "localDate") if k in o), None)
-            rk = "fundReturn" if "fundReturn" in o else next((k for k in o if "eturn" in k and isinstance(o[k], (int, float))), None)
-            if dk and rk and o[rk] is not None: pts.append([str(o[dk])[:10], round(100 + float(o[rk]), 3)])
-            else:
-                for v in o.values(): walk(v)
-        elif isinstance(o, list):
-            for v in o: walk(v)
-    walk(raw); pts.sort(); return pts
+    for o in ser:
+        try: pts.append([str(o["tradeDate"])[:10], float(o["basePrice"]), o.get("benchmarkIndex")])
+        except Exception: pass
+    pts.sort()
+    if len(pts) < 3: return [[d, p] for d, p, _ in pts], False
+    first, last = pts[0][1], pts[-1][1]; adjusted = False
+    if rep1y is not None and first > 0:
+        raw1y = (last / first - 1) * 100
+        if abs(raw1y - rep1y) > max(1.5, abs(rep1y) * 0.08):
+            exc = []
+            for i in range(1, len(pts)):
+                fr = pts[i][1] / pts[i - 1][1] - 1
+                b0, b1 = pts[i - 1][2], pts[i][2]; br = (b1 / b0 - 1) if (b0 and b1) else 0.0
+                exc.append((fr - br, i))
+            j = min(exc)[1]; k = last / (first * (1 + rep1y / 100))
+            if 0.05 < k < 1.0:
+                for i in range(j): pts[i][1] *= k
+                adjusted = True
+    return [[d, round(p, 2)] for d, p, _ in pts], adjusted
 
 if __name__ == "__main__":
     rows = list(csv.DictReader(open("collector/sema_funds.csv", encoding="utf-8")))
@@ -100,13 +112,13 @@ if __name__ == "__main__":
     for i, (b, d) in enumerate(res):
         if d:
             if i == 0: print("SAMPLE chart_raw:", json.dumps(d["chart_raw"], ensure_ascii=False)[:600])
-            d["chart"] = chart_points(d.pop("chart_raw")); b["n_chart"] = len(d["chart"])
+            d["chart"], d["adjusted"] = chart_points(d.pop("chart_raw"), (b.get("ret") or {}).get("1y")); b["n_chart"] = len(d["chart"]); b["adj"] = d["adjusted"]
             json.dump(d, open(f"docs/funds/{b['code']}.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
         funds.append(b)
     ok = [f for f in funds if f.get("nav")]
     if len(ok) < len(funds) * 0.6: raise SystemExit(f"수집 성공 {len(ok)}/{len(funds)} - 저장하지 않음")
     json.dump({"asof": max(f["nav_date"] for f in ok), "funds": funds}, open("docs/funds.json", "w", encoding="utf-8"), ensure_ascii=False, separators=(",", ":"))
     from collections import Counter
-    print("funds", len(funds), "ok", len(ok), Counter(f["match"] for f in funds), "chart pts", Counter(min(f.get("n_chart", 0), 300) // 50 * 50 for f in ok))
+    print("funds", len(funds), "ok", len(ok), Counter(f["match"] for f in funds), "보정", Counter(f.get("adj") for f in ok))
     print("SAMPLE", json.dumps(ok[0], ensure_ascii=False)[:900])
     print("NONE", [f["name"] for f in funds if not f.get("nav")])
