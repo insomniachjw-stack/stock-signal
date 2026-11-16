@@ -1,11 +1,18 @@
-name: probe2
+name: match-funds
 on:
+  workflow_dispatch:
   push:
-    paths: ["tools/probe2.py", ".github/workflows/probe2.yml"]
+    paths: ["tools/match_funds.py", ".github/workflows/probe2.yml"]
+permissions:
+  contents: write
 jobs:
   p:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: pip install -q requests && python tools/probe2.py
+      - run: pip install -q requests && python tools/match_funds.py
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add collector/fund_codes.json && git commit -qm "펀드 코드 대응표 갱신" && git pull -q --rebase origin main && git push -q origin main
